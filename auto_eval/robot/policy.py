@@ -261,6 +261,188 @@ class OpenVLAPolicy(BasePolicy):
         return self._call_action_fn(obs_dict, language_instruction)
 
 
+class SimpleVLARLPolicy(BasePolicy):
+    """Policy for SimpleVLA-RL (OpenVLA with OFT fine-tuning)"""
+
+    def __init__(self, config, device="cuda:0"):
+        """Initialize with optional return_all_chunks parameter"""
+        self.return_all_chunks = config.get("return_all_chunks", False)
+        super().__init__(config, device)
+
+    def create_agent(self):
+        import torch
+        import tensorflow as tf
+        from PIL import Image
+        from transformers import AutoConfig, AutoModelForVision2Seq, AutoProcessor
+        import json
+        from pathlib import Path
+
+        # Disable cuDNN SDP to avoid cuDNN errors (same as SIMPLER eval)
+        torch.backends.cuda.enable_cudnn_sdp(False)
+
+        # Get checkpoint paths from config
+        rl_checkpoint = self.config["rl_checkpoint_path"]
+        sft_checkpoint = self.config["sft_checkpoint_path"]
+
+        # Load processor from SFT checkpoint
+        self.processor = AutoProcessor.from_pretrained(
+            sft_checkpoint,
+            trust_remote_code=True
+        )
+
+        # Load model config and set use_proprio=False
+        model_config = AutoConfig.from_pretrained(
+            rl_checkpoint,
+            trust_remote_code=True
+        )
+        model_config.use_proprio = False
+
+        # Load model
+        self.vla = AutoModelForVision2Seq.from_pretrained(
+            rl_checkpoint,
+            config=model_config,
+            attn_implementation="eager",
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+        ).to(self.device)
+
+        # Load dataset statistics (check both RL and SFT checkpoints)
+        for checkpoint_path in [rl_checkpoint, sft_checkpoint]:
+            dataset_stats_path = Path(checkpoint_path) / "dataset_statistics.json"
+            if dataset_stats_path.exists():
+                print(f"Loading dataset statistics from {dataset_stats_path}")
+                with open(dataset_stats_path, 'r') as f:
+                    self.vla.norm_stats = json.load(f)
+                break
+
+        # Store config parameters
+        self.temperature = self.config.get("temperature", 1.6)
+        self.do_sample = self.config.get("do_sample", True)
+        self.unnorm_key = self.config.get("unnorm_key", "bridge_dataset")
+
+        print(f"SimpleVLA-RL Policy loaded")
+        print(f"  Temperature: {self.temperature}")
+        print(f"  Sampling: {self.do_sample}")
+        print(f"  Unnorm key: {self.unnorm_key}")
+
+    def _center_crop_image(self, image_np):
+        """Center crop image to 0.9 area and resize to 224x224"""
+        import tensorflow as tf
+        from PIL import Image
+
+        # Force TensorFlow to use CPU only to avoid OOM (PyTorch is using GPU)
+        tf.config.set_visible_devices([], 'GPU')
+
+        crop_scale = 0.9
+        batch_size = 1
+
+        # Convert to TF tensor
+        image = tf.convert_to_tensor(image_np)
+        orig_dtype = image.dtype
+
+        # Convert to float32 for processing
+        image = tf.image.convert_image_dtype(image, tf.float32)
+
+        # Expand dims if needed
+        if len(image.shape) == 3:
+            image = tf.expand_dims(image, axis=0)
+
+        # Calculate crop box
+        new_height = tf.sqrt(crop_scale)
+        new_width = tf.sqrt(crop_scale)
+        height_offset = (1 - new_height) / 2
+        width_offset = (1 - new_width) / 2
+
+        bounding_box = [height_offset, width_offset,
+                       height_offset + new_height,
+                       width_offset + new_width]
+        bounding_boxes = tf.reshape(bounding_box, (1, 4))
+
+        # Crop and resize to 224x224
+        image = tf.image.crop_and_resize(
+            image,
+            bounding_boxes,
+            [0],
+            (224, 224)
+        )
+
+        # Clip and convert back
+        image = tf.clip_by_value(image, 0, 1)
+        image = tf.image.convert_image_dtype(image, orig_dtype, saturate=True)
+
+        # Remove batch dimension
+        image = image[0].numpy()
+
+        # Convert to PIL
+        image_pil = Image.fromarray(image).convert("RGB")
+        return image_pil
+
+    def __call__(self, obs_dict, language_instruction):
+        import torch
+
+        # Extract image
+        image_np = obs_dict["image_primary"]
+
+        # Apply center crop preprocessing
+        image_pil = self._center_crop_image(image_np)
+
+        # Create prompt
+        prompt = f"In: What action should the robot take to {language_instruction.lower()}?\nOut:"
+
+        # Tokenize
+        inputs = self.processor(prompt, image_pil).to(
+            self.device,
+            dtype=torch.bfloat16
+        )
+
+        # Check and append action start token (29871) if needed
+        if not torch.all(inputs["input_ids"][:, -1] == 29871):
+            inputs["input_ids"] = torch.cat(
+                (inputs["input_ids"],
+                 torch.tensor([[29871]], dtype=torch.long, device=self.device)),
+                dim=1
+            )
+            inputs["attention_mask"] = torch.cat(
+                (inputs["attention_mask"],
+                 torch.tensor([[True]], dtype=torch.bool, device=self.device)),
+                dim=1
+            )
+
+        # Generate action (returns shape: (1, 8, 7))
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+            actions = self.vla.generate_action_verl(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs["pixel_values"],
+                proprio=None,  # Disabled
+                attention_mask=inputs["attention_mask"],
+                padding_idx=self.processor.tokenizer.pad_token_id,
+                do_sample=self.do_sample,
+                unnorm_key=self.unnorm_key,
+                temperature=self.temperature,
+            )[0]  # actions is first return value
+
+        # Convert actions to numpy
+        if torch.is_tensor(actions):
+            actions_np = actions.detach().cpu().numpy()
+        else:
+            actions_np = np.asarray(actions)
+
+        # Debug logging
+        print(f"[DEBUG] actions_np shape: {actions_np.shape}, return_all_chunks: {self.return_all_chunks}")
+
+        # Return all chunks or just the first chunk
+        if self.return_all_chunks:
+            # Return all action chunks (shape: (5, 7) for BRIDGE)
+            return actions_np
+        else:
+            # Return first action chunk only (shape: (7,))
+            return actions_np[0]
+
+    def reset(self):
+        """Reset policy state (no state for this policy)"""
+        pass
+
+
 class OpenPiZero(BasePolicy):
     def __init__(self, config):
         super().__init__(config)
@@ -733,6 +915,7 @@ policies = {
     "jaxrl_gc_policy": GCPolicy,
     "octo": OctoPolicy,
     "openvla": OpenVLAPolicy,
+    "simplevla_rl": SimpleVLARLPolicy,
     "soar": SOARPolicy,
     "scripted": RecordedPolicy,
     "scripted_sequence": SequenceRecordedPolicy,

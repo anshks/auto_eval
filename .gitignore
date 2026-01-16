@@ -175,3 +175,6 @@ cython_debug/
 database.db
 database_backup.db
 .vscode/
+
+logs/
+simpler_videos/

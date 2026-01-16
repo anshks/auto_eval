@@ -108,6 +108,10 @@ slack_bot = None
 # Global wandb logger instance
 wandb_logger = None
 
+platform = os.environ.get("ROBOT_PLATFORM", "").lower()
+simplevla_chunk = {"worldgym": 8, "bridge": 5}.get(platform, 8)
+
+
 
 def get_single_img(obs):
     img = obs["image_primary"]
@@ -361,11 +365,19 @@ def main(_):
         from octo.utils.gym_wrappers import TemporalEnsembleWrapper
 
         env = TemporalEnsembleWrapper(env, 4)
+    elif FLAGS.config.eval_policy_type == "simplevla_rl":
+        from octo.utils.gym_wrappers import TemporalEnsembleWrapper
+
+        env = TemporalEnsembleWrapper(env, simplevla_chunk)
 
     if FLAGS.config.reset_policy_type in ("pizero", "pi_zero_client"):
         from octo.utils.gym_wrappers import TemporalEnsembleWrapper
 
         reset_env = TemporalEnsembleWrapper(reset_env, 4)
+    elif FLAGS.config.reset_policy_type == "simplevla_rl":
+        from octo.utils.gym_wrappers import TemporalEnsembleWrapper
+
+        reset_env = TemporalEnsembleWrapper(reset_env, simplevla_chunk)
 
     """
     success detection
