@@ -30,7 +30,7 @@ Note that if you aren't able to resolve bore.pub's DNS (test this with `ping bor
 
 import json_numpy
 
-json_numpy.patch()
+# json_numpy.patch() # PATCHING LATER to avoid conflicts
 
 import json
 import logging

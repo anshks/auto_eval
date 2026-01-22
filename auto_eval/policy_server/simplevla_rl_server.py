@@ -12,13 +12,12 @@ Then expose via bore.pub:
 """
 
 import os
-import json_numpy
-json_numpy.patch()
 import logging
 import traceback
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, List
 import json
+from datetime import datetime
 
 import draccus
 import numpy as np
@@ -27,6 +26,7 @@ import uvicorn
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import imageio
 
 # Import base class for action chunking
 from auto_eval.policy_server.template_advanced import ActionChunkingObsHistoryPolicyServer
@@ -34,7 +34,14 @@ from auto_eval.policy_server.template_advanced import ActionChunkingObsHistoryPo
 # Import SimpleVLARLPolicy from auto_eval
 from auto_eval.robot.policy import SimpleVLARLPolicy
 
+import json_numpy
+# json_numpy.patch() # PATCHING LATER to avoid conflicts
+
 logging.basicConfig(level=logging.INFO)
+
+# Directory for saving trajectories
+TRAJECTORY_DIR = "rollout_trajectories"
+os.makedirs(TRAJECTORY_DIR, exist_ok=True)
 
 
 class SimpleVLARLServer(ActionChunkingObsHistoryPolicyServer):
@@ -70,10 +77,36 @@ class SimpleVLARLServer(ActionChunkingObsHistoryPolicyServer):
         logging.info(f"Loading SimpleVLA-RL policy on {self.device}...")
         self.policy = SimpleVLARLPolicy(config=policy_config, device=self.device)
 
+        # Trajectory collection buffers
+        self._obs_frames: List[np.ndarray] = []
+        self._actions: List[np.ndarray] = []
+        self._current_instruction: str = ""
+
         logging.info(f"✅ SimpleVLA-RL Server initialized on {self.device}")
         logging.info(f"RL checkpoint: {rl_checkpoint}")
         logging.info(f"SFT checkpoint: {sft_checkpoint}")
         logging.info(f"Action chunking: 5 chunks with temporal ensembling")
+
+    def _save_trajectory(self):
+        """Save collected trajectory to disk"""
+        if len(self._obs_frames) == 0 or len(self._actions) == 0:
+            logging.info("No trajectory data to save")
+            return
+
+        # Create filename from instruction and timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_instruction = "".join(c if c.isalnum() or c in " _-" else "_" for c in self._current_instruction)[:50]
+        base_name = f"{safe_instruction}_{timestamp}"
+
+        # Save video
+        video_path = os.path.join(TRAJECTORY_DIR, f"{base_name}.mp4")
+        imageio.mimwrite(video_path, self._obs_frames, fps=10)
+        logging.info(f"Saved video: {video_path} ({len(self._obs_frames)} frames)")
+
+        # Save actions
+        actions_path = os.path.join(TRAJECTORY_DIR, f"{base_name}_actions.npz")
+        np.savez(actions_path, actions=np.array(self._actions))
+        logging.info(f"Saved actions: {actions_path} ({len(self._actions)} steps)")
 
     def predict_action_chunk(self, obs_dict: dict, instruction: str):
         """
@@ -90,6 +123,10 @@ class SimpleVLARLServer(ActionChunkingObsHistoryPolicyServer):
         policy_obs_dict = {
             "image_primary": obs_dict["image"]
         }
+
+        # Save observation frame
+        self._obs_frames.append(obs_dict["image"].copy())
+        self._current_instruction = instruction
 
         # Run policy inference - returns (5, 7) action chunks
         action_chunks = np.asarray(self.policy(policy_obs_dict, instruction))
@@ -113,11 +150,22 @@ class SimpleVLARLServer(ActionChunkingObsHistoryPolicyServer):
 
         # Validate final action shape
         assert action.shape == (7,), f"Invalid action shape {action.shape}"
-
+        
+        # Save action
+        self._actions.append(action.copy())
+        
         return action
 
     def reset(self):
         """Reset server state (observation and action history)"""
+        # Save previous trajectory before reset
+        self._save_trajectory()
+        
+        # Clear trajectory buffers
+        self._obs_frames = []
+        self._actions = []
+        self._current_instruction = ""
+        
         # Reset observation and action history from base class
         super().reset()
         # SimpleVLA-RL policy itself is stateless
@@ -156,6 +204,15 @@ def load_model_on_startup():
     )
 
     logging.info("[Server Startup] Server loaded successfully")
+
+    # Now that the heavy imports (TensorFlow etc) are likely done, we can try to patch json_numpy
+    # However, json_numpy.patch() patches the json module globally.
+    # If we patch it here, it might be safe.
+    try:
+        json_numpy.patch()
+        logging.info("Successfully patched json_numpy after model load")
+    except Exception as e:
+        logging.error(f"Failed to patch json_numpy: {e}")
 
 
 # Add CORS middleware

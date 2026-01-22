@@ -38,7 +38,7 @@ class OpenWebClient:
         # we need to able to serialize numpy arrays to json to send over the network
         import json_numpy
 
-        json_numpy.patch()
+        # json_numpy.patch() # PATCHING LATER to avoid conflicts
 
     def __call__(
         self, obs_dict: Dict[str, Any], language_instruction: Optional[str] = None
@@ -161,7 +161,7 @@ class OpenVLAClient(PortForwardingClient):
         # lazy imports
         import json_numpy
 
-        json_numpy.patch()
+        # json_numpy.patch() # PATCHING LATER to avoid conflicts
         super().__init__(host, port, ssh_port)
 
     def __call__(
@@ -199,7 +199,7 @@ class OpenPiZeroClient(PortForwardingClient):
         # lazy imports
         import json_numpy
 
-        json_numpy.patch()
+        # json_numpy.patch() # PATCHING LATER to avoid conflicts
         super().__init__(host, port, ssh_port)
 
     def __call__(
@@ -249,7 +249,7 @@ class GoalImageGeneratorClient(PortForwardingClient):
         # lazy imports
         import json_numpy
 
-        json_numpy.patch()
+        # json_numpy.patch() # PATCHING LATER to avoid conflicts
         super().__init__(host, port, ssh_port)
         self.config = config
 

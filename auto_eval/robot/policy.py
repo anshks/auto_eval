@@ -271,11 +271,11 @@ class SimpleVLARLPolicy(BasePolicy):
 
     def create_agent(self):
         import torch
-        import tensorflow as tf
         from PIL import Image
         from transformers import AutoConfig, AutoModelForVision2Seq, AutoProcessor
         import json
         from pathlib import Path
+        import tensorflow as tf
 
         # Disable cuDNN SDP to avoid cuDNN errors (same as SIMPLER eval)
         torch.backends.cuda.enable_cudnn_sdp(False)
