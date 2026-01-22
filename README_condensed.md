@@ -8,14 +8,15 @@ pip install -r requirements.txt
 ```
 
 2.0: install ngrok:
-Linus: https://ngrok.com/docs/guides/device-gateway/linux#1-install-the-ngrok-agent
+Linux: https://ngrok.com/docs/guides/device-gateway/linux#1-install-the-ngrok-agent
+
 MacOS: https://ngrok.com/docs/getting-started
 
 2.1: get your ngrok token and authenticate following:
 https://dashboard.ngrok.com/get-started/your-authtoken
 
 3.0: Set policy configuration in `scripts/simplevla_rl_server/run_simplevla_rl_server.sbatch`:
-Set `RL_CHECKPOINT` to the checkpoint directory of your RL model;
+Set `RL_CHECKPOINT` to the checkpoint directory of the RL model;
 Set `SFT_CHECKPOINT` to the checkpoint directory of the base model;
 Set `AUTO_EVAL_DIR` to the directory of this codebase.
 
