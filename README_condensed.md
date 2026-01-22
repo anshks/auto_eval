@@ -5,6 +5,7 @@ Quick Run Down
 conda create -n autoeval python=3.10 -y
 conda activate autoeval
 pip install -r requirements.txt
+pip install imageio[ffmpeg] datetime
 ```
 
 2.0: install ngrok:
