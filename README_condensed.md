@@ -35,12 +35,12 @@ Run what is inside `scripts/simplevla_rl_server/run_simplevla_rl_server.sbatch` 
 ```bash
 nohup ngrok http 8000 > ngrok.log 2>&1 &
 ```
-To check the IP address, run
+To check the reserved domain, run
 ```bash
 ngrok http 8000
 ```
 At this point you either see an interface popping up or error messages saying it is already online.
-Both are fine. Find the link with the work `unadorned` in it, and that is the IP address.
+Both are fine. Find the link with the work ending with '.dev', and that is the domain address.
 
 4.2: Open the link to test connection. If it shows a page with `{"detail":"Not Found"}`, it is connected. If it shows a fancy page telling you there is an error, then the server is not running properly.
 
