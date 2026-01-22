@@ -26,6 +26,8 @@ With SLURM:
 ```bash
 sbatch scripts/simplevla_rl_server/run_simplevla_rl_server.sbatch
 ```
+Then ssh to the allocated GPU.
+
 Without SLURM:
 Run what is inside `scripts/simplevla_rl_server/run_simplevla_rl_server.sbatch` directly in terminal.
 
@@ -33,16 +35,14 @@ Run what is inside `scripts/simplevla_rl_server/run_simplevla_rl_server.sbatch` 
 ```bash
 nohup ngrok http 8000 > ngrok.log 2>&1 &
 ```
-At this time you either :
-
-a. See an interface popping up, and the link with `unadorned` in it is the IP address.
-b. otherwise, check the IP by running:
+To check the IP address, run
 ```bash
 ngrok http 8000
 ```
-and the link with `unadorned` should appear, and that is the IP address.
+At this point you either see an interface popping up or error messages saying it is already online.
+Both are fine. Find the link with the work `unadorned` in it, and that is the IP address.
 
-4.2: Open the link to test connection. If it shows a page that is mostly black, it is connected. If it shows a fancy page telling you there is an error, then the server is not running properly.
+4.2: Open the link to test connection. If it shows a page with `{"detail":"Not Found"}`, it is connected. If it shows a fancy page telling you there is an error, then the server is not running properly.
 
 4.3 In case the server is not running properly, check the logs in `logs/simplevla_server_%j.err` first. If there is no error, use
 ```bash
